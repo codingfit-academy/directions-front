@@ -25,7 +25,7 @@ const Page = () => {
   }, [isGreenLight]);
 
   // Backend Communication Sample
-  const [serverStatus, setServerStatus] = useState<any>(null);
+  const [serverStatus, setServerStatus] = useState<unknown>(null);
   useEffect(() => {
     fetch('http://localhost:5000/api/hello')
       .then((res) => res.json())
