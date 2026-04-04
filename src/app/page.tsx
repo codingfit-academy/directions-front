@@ -1,36 +1,74 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { MapPin, Navigation, Clock, Search, Navigation2, ChevronRight, Activity, Zap, ShieldAlert } from 'lucide-react';
+import { MapPin, Navigation, Clock, Search, Navigation2, ChevronRight, ChevronLeft, Activity, Zap, ShieldAlert, Crosshair, Menu } from 'lucide-react';
 
 const Page = () => {
+  // Drawer & Layout State
+  const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+
+  // GPS Location State
+  const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [locationError, setLocationError] = useState('');
+
   // State for traffic light simulation
-  const [isGreenLight, setIsGreenLight] = useState(false);
-  const [countdown, setCountdown] = useState(45);
+  const [trafficLight, setTrafficLight] = useState({ isGreen: false, timer: 45 });
+  const isGreenLight = trafficLight.isGreen;
+  const countdown = trafficLight.timer;
+
+  // 위치 허용 요청 함수
+  const requestLocation = () => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+          setOrigin('현재 내 위치');
+          setLocationError('');
+        },
+        (error) => {
+          setLocationError('위치 정보를 가져올 수 없습니다.');
+          console.error("Error getting location:", error);
+        }
+      );
+    } else {
+      setLocationError('이 브라우저에서는 위치 서비스를 지원하지 않습니다.');
+    }
+  };
 
   // Simulating traffic light countdown
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          setIsGreenLight((current) => !current);
+    const timerInterval = setInterval(() => {
+      setTrafficLight((prev) => {
+        if (prev.timer <= 1) {
+          const nextIsGreen = !prev.isGreen;
           // 30 seconds for green, 45 seconds for red
-          return !isGreenLight ? 30 : 45;
+          return { isGreen: nextIsGreen, timer: nextIsGreen ? 30 : 45 };
         }
-        return prev - 1;
+        return { ...prev, timer: prev.timer - 1 };
       });
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, [isGreenLight]);
+    return () => clearInterval(timerInterval);
+  }, []);
 
   // Backend Communication Sample
   const [serverStatus, setServerStatus] = useState<any>(null);
+  
+  // 백엔드 연결을 위한 샘플 URL (현재는 연결하지 않음)
+  const SAMPLE_API_URL = 'https://api.sample-backend.com/v1/directions';
+  
   useEffect(() => {
-    fetch('http://localhost:5000/api/hello')
+    // 나중에 백엔드와 통신할 때 주석을 해제하고 사용하세요.
+    /*
+    fetch(SAMPLE_API_URL)
       .then((res) => res.json())
       .then((data) => setServerStatus(data))
       .catch((err) => console.error('Error fetching backend:', err));
+    */
   }, []);
 
   // Handle Search state
@@ -38,29 +76,62 @@ const Page = () => {
   const [destination, setDestination] = useState('');
   const [age, setAge] = useState('');
 
+  // 모바일 드로워 터치 드래그 핸들러
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartY(e.touches[0].clientY);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartY === null) return;
+    const currentY = e.touches[0].clientY;
+    const diff = currentY - touchStartY;
+
+    // 40px 이상 이동 시 열고 닫히도록 설정
+    if (diff > 40 && isDrawerOpen) {
+      setIsDrawerOpen(false);
+      setTouchStartY(null); 
+    } else if (diff < -40 && !isDrawerOpen) {
+      setIsDrawerOpen(true);
+      setTouchStartY(null); 
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setTouchStartY(null);
+  };
+
   return (
     <div className="flex h-screen w-full bg-gray-100 flex-col md:flex-row overflow-hidden relative font-sans">
       
       {/* 
         DESKTOP SIDEBAR / MOBILE BOTTOM SHEET
       */}
-      <div className="
+      <div className={`
         absolute md:relative z-20
         bottom-0 left-0 right-0 md:bottom-auto md:left-auto md:right-auto
-        w-full md:w-[400px] h-[65vh] md:h-full 
+        w-full md:w-[400px] shrink-0
         bg-white md:bg-white/95 md:backdrop-blur-xl
         rounded-t-[32px] md:rounded-none
         shadow-[0_-8px_30px_rgba(0,0,0,0.12)] md:shadow-2xl
-        flex flex-col overflow-hidden
-        transition-transform duration-500 ease-in-out
-      ">
-        {/* Mobile Handle */}
-        <div className="w-full flex justify-center pt-4 pb-2 md:hidden">
-          <div className="w-14 h-1.5 bg-gray-200 rounded-full" />
-        </div>
+        transition-all duration-500 ease-in-out
+        ${isDrawerOpen 
+          ? 'h-[65vh] md:h-full translate-y-0 md:ml-0 md:opacity-100' 
+          : 'h-[80px] md:h-full md:-ml-[400px] translate-y-0'}
+      `}>
+        <div className="w-full md:w-[400px] h-full flex flex-col overflow-hidden pointer-events-auto">
+          {/* Mobile Handle */}
+          <div 
+            className="w-full flex justify-center pt-4 pb-4 md:hidden cursor-pointer active:bg-gray-50 touch-none"
+            onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            <div className="w-14 h-1.5 bg-gray-200 rounded-full" />
+          </div>
 
-        {/* Search Section */}
-        <div className="p-6 pb-5 border-b border-gray-100 flex-shrink-0">
+          {/* Search Section */}
+          <div className="p-6 pb-5 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-black text-gray-900 flex items-center gap-2">
               <Navigation2 className="text-primary w-7 h-7" />
@@ -85,9 +156,20 @@ const Page = () => {
                 placeholder="출발지를 입력하세요" 
                 value={origin}
                 onChange={(e) => setOrigin(e.target.value)}
-                className="w-full pl-10 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
+                className="w-full pl-10 pr-12 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
               />
+              <button 
+                onClick={requestLocation}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-primary hover:bg-white rounded-xl transition-all"
+                title="내 위치 가져오기"
+              >
+                <Crosshair className="w-4 h-4" />
+              </button>
             </div>
+            
+            {locationError && (
+              <p className="text-xs text-danger mt-1 px-1">{locationError}</p>
+            )}
             
             <div className="relative group">
               <MapPin className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-danger" />
@@ -148,11 +230,9 @@ const Page = () => {
                   {isGreenLight ? <Navigation className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
                   <span className="font-bold">{isGreenLight ? '현재 원활 (녹색 신호)' : '현재 대기 (적색 신호)'}</span>
                 </div>
-                {!isGreenLight && (
-                  <div className="text-right font-black text-lg tabular-nums animate-pulse">
-                    {countdown}초 후 출발
-                  </div>
-                )}
+                <div className="text-right font-black text-lg tabular-nums animate-pulse">
+                  {countdown}초 {isGreenLight ? '남음' : '후 출발'}
+                </div>
              </div>
           </div>
 
@@ -217,7 +297,16 @@ const Page = () => {
             </div>
           </div>
         </div>
+        </div>
       </div>
+
+      {/* Desktop Drawer Toggle Button */}
+      <button 
+        onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+        className={`fixed top-6 z-30 bg-white p-3.5 rounded-2xl shadow-xl border border-gray-100 text-gray-700 hover:text-primary transition-all duration-500 hidden md:flex items-center justify-center hover:scale-105 active:scale-95 ${isDrawerOpen ? 'left-[424px]' : 'left-6'}`}
+      >
+        {isDrawerOpen ? <ChevronLeft className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+      </button>
 
       {/* 
         MAP RENDERER
@@ -278,6 +367,17 @@ const Page = () => {
               <div className="absolute -inset-8 border border-primary/10 rounded-full" />
            </div>
          </div>
+
+         {/* GPS Floating Action Button (내 위치로 이동) */}
+         <button 
+           onClick={requestLocation}
+           className={`absolute right-4 md:right-6 z-30 bg-white p-3.5 rounded-full shadow-lg border border-gray-100 text-gray-700 hover:text-primary transition-all duration-500 flex items-center justify-center hover:scale-105 active:scale-95
+             ${isDrawerOpen ? 'bottom-[calc(65vh+20px)] md:bottom-6' : 'bottom-[100px] md:bottom-6'}
+           `}
+           title="내 위치로 이동"
+         >
+           <Crosshair className="w-6 h-6" />
+         </button>
       </div>
 
     </div>

@@ -1,7 +1,7 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'RouteFinder',
+  title: '지도',
   description: 'AI Traffic & Route Finder',
 };
 
