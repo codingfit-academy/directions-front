@@ -56,15 +56,11 @@ const Page = () => {
   }, []);
 
   // Backend Communication Sample
-<<<<<<< HEAD
   const [serverStatus, setServerStatus] = useState<any>(null);
   
   // 백엔드 연결을 위한 샘플 URL (현재는 연결하지 않음)
   const SAMPLE_API_URL = 'https://api.sample-backend.com/v1/directions';
   
-=======
-  const [serverStatus, setServerStatus] = useState<unknown>(null);
->>>>>>> b13a841f5788be1010b1566570b13487dca56c97
   useEffect(() => {
     // 나중에 백엔드와 통신할 때 주석을 해제하고 사용하세요.
     /*
