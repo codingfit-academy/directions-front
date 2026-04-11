@@ -56,7 +56,7 @@ const Page = () => {
   }, []);
 
   // Backend Communication Sample
-  const [serverStatus, setServerStatus] = useState<any>(null);
+  const [serverStatus, setServerStatus] = useState<boolean | null>(null);
   
   // 백엔드 연결을 위한 샘플 URL (현재는 연결하지 않음)
   const SAMPLE_API_URL = 'https://api.sample-backend.com/v1/directions';
