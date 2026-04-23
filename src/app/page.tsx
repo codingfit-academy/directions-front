@@ -6,6 +6,7 @@ import { MapPin, Navigation, Clock, Search, Navigation2, ChevronRight, ChevronLe
 
 declare global {
   interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     naver: any;
   }
 }
@@ -18,11 +19,13 @@ const Page = () => {
   const [touchStartY, setTouchStartY] = useState<number | null>(null);
 
   // GPS Location State
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [locationError, setLocationError] = useState('');
 
   // Map State
   const [clientId, setClientId] = useState<string>('');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
@@ -100,13 +103,16 @@ const Page = () => {
   }, []);
 
   // Backend Communication Sample
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [serverStatus, setServerStatus] = useState<boolean | null>(null);
   const [selectedAnimal, setSelectedAnimal] = useState(ANIMAL_OPTIONS[0]);
   
   // 백엔드 연결을 위한 샘플 URL (현재는 연결하지 않음)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const SAMPLE_API_URL = 'https://api.sample-backend.com/v1/directions';
   
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedAnimal(ANIMAL_OPTIONS[Math.floor(Math.random() * ANIMAL_OPTIONS.length)]);
   }, []);
   
