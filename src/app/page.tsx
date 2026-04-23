@@ -159,7 +159,7 @@ const Page = () => {
     <>
       {clientId && (
         <Script
-          src={`https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${clientId}`}
+          src={`https://openapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${clientId}`}
           strategy="afterInteractive"
           onLoad={initializeMap}
         />
