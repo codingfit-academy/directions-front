@@ -1,7 +1,16 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import Script from 'next/script';
 import { MapPin, Navigation, Clock, Search, Navigation2, ChevronRight, ChevronLeft, Activity, Zap, ShieldAlert, Crosshair, Menu } from 'lucide-react';
+
+declare global {
+  interface Window {
+    naver: any;
+  }
+}
+
+const ANIMAL_OPTIONS = ['🐶', '🐱', '🐰', '🦊', '🐼', '🐻', '🦝'];
 
 const Page = () => {
   // Drawer & Layout State
@@ -11,6 +20,31 @@ const Page = () => {
   // GPS Location State
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [locationError, setLocationError] = useState('');
+
+  // Map State
+  const [clientId, setClientId] = useState<string>('');
+  const mapRef = useRef<any>(null);
+
+  useEffect(() => {
+    fetch('https://directions-api.codingfit.kr/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.naverMapsClientId) {
+          setClientId(data.naverMapsClientId);
+        }
+      })
+      .catch((err) => console.error('Failed to fetch config:', err));
+  }, []);
+
+  const initializeMap = () => {
+    if (window.naver && window.naver.maps) {
+      const mapOptions = {
+        center: new window.naver.maps.LatLng(37.5666103, 126.9783882), // 서울 시청
+        zoom: 13,
+      };
+      mapRef.current = new window.naver.maps.Map('map', mapOptions);
+    }
+  };
 
   // State for traffic light simulation
   const [trafficLight, setTrafficLight] = useState({ isGreen: false, timer: 45 });
@@ -22,12 +56,22 @@ const Page = () => {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          setUserLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          setUserLocation({ lat, lng });
           setOrigin('현재 내 위치');
           setLocationError('');
+          
+          if (mapRef.current && window.naver && window.naver.maps) {
+            const loc = new window.naver.maps.LatLng(lat, lng);
+            mapRef.current.setCenter(loc);
+            mapRef.current.setZoom(15);
+            // 마커 추가
+            new window.naver.maps.Marker({
+              position: loc,
+              map: mapRef.current
+            });
+          }
         },
         (error) => {
           setLocationError('위치 정보를 가져올 수 없습니다.');
@@ -57,9 +101,14 @@ const Page = () => {
 
   // Backend Communication Sample
   const [serverStatus, setServerStatus] = useState<boolean | null>(null);
+  const [selectedAnimal, setSelectedAnimal] = useState(ANIMAL_OPTIONS[0]);
   
   // 백엔드 연결을 위한 샘플 URL (현재는 연결하지 않음)
   const SAMPLE_API_URL = 'https://api.sample-backend.com/v1/directions';
+  
+  useEffect(() => {
+    setSelectedAnimal(ANIMAL_OPTIONS[Math.floor(Math.random() * ANIMAL_OPTIONS.length)]);
+  }, []);
   
   useEffect(() => {
     // 나중에 백엔드와 통신할 때 주석을 해제하고 사용하세요.
@@ -101,7 +150,26 @@ const Page = () => {
   };
 
   return (
-    <div className="flex h-screen w-full bg-gray-100 flex-col md:flex-row overflow-hidden relative font-sans">
+    <>
+      {clientId && (
+        <Script
+          src={`https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${clientId}`}
+          strategy="afterInteractive"
+          onLoad={initializeMap}
+        />
+      )}
+      <div className="flex h-screen w-full bg-gray-100 flex-col md:flex-row overflow-hidden relative font-sans">
+      <div className="absolute top-4 right-4 z-40 pointer-events-none">
+        <div className="stairs-badge">
+          <div className="stairs-base" />
+          <div className="stairs-step stairs-step-1" />
+          <div className="stairs-step stairs-step-2" />
+          <div className="stairs-step stairs-step-3" />
+          <div className="stairs-step stairs-step-4" />
+          <div className="stairs-animal" aria-hidden="true">{selectedAnimal}</div>
+          <div className="stairs-shadow" />
+        </div>
+      </div>
       
       {/* 
         DESKTOP SIDEBAR / MOBILE BOTTOM SHEET
@@ -135,7 +203,7 @@ const Page = () => {
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-black text-gray-900 flex items-center gap-2">
               <Navigation2 className="text-primary w-7 h-7" />
-              RouteFinder
+              집 가는 길!!!
             </h1>
             {serverStatus ? (
               <div className="text-[10px] font-bold bg-success/10 text-success px-2.5 py-1 rounded-full flex items-center gap-1.5 border border-success/20">
@@ -312,61 +380,7 @@ const Page = () => {
         MAP RENDERER
       */}
       <div className="flex-1 relative bg-[#f0ede5] overflow-hidden flex items-center justify-center h-[45vh] md:h-full z-10 isolate">
-         {/* Fake Map Grid Pattern */}
-         <div className="absolute inset-0 opacity-[0.08]" style={{ backgroundImage: 'radial-gradient(#000 1.5px, transparent 1.5px)', backgroundSize: '30px 30px' }} />
-         
-         {/* Decorative elements representing geographical areas */}
-         <div className="absolute top-[10%] left-[10%] w-64 h-64 bg-success/20 rounded-full blur-3xl opacity-50" />
-         <div className="absolute bottom-[20%] right-[10%] w-96 h-96 bg-primary/10 rounded-full blur-3xl opacity-60" />
-
-         {/* Curved Route Line (SVG) */}
-         {/* Using viewBox to handle responsiveness and aspect ratio dynamically */}
-         <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-80" preserveAspectRatio="xMidYMid slice" viewBox="0 0 1000 1000">
-            {/* Shadow path */}
-            <path 
-              d="M 300,800 C 400,600 700,500 750,300" 
-              fill="none" 
-              stroke="rgba(0,0,0,0.1)"
-              strokeWidth="12"
-              strokeLinecap="round"
-              className="translate-y-2 translate-x-1"
-            />
-            {/* Animated blue route path */}
-            <path 
-              d="M 300,800 C 400,600 700,500 750,300" 
-              fill="none" 
-              stroke="#3B82F6"
-              strokeWidth="12"
-              strokeLinecap="round"
-              strokeDasharray="20 15"
-              className="animate-dash"
-            />
-         </svg>
-
-         {/* Markers Container mapped to SVG coordinates visually (approx) */}
-         <div className="absolute inset-0 w-full h-full flex items-center justify-center pointer-events-none">
-           {/* We use percentage or relative positioning based on SVG above */}
-           
-           {/* Destination Marker */}
-           <div className="absolute top-[30%] left-[75%] -translate-x-1/2 -translate-y-full mt-4 flex flex-col items-center">
-              <div className="bg-danger text-white p-3 rounded-full shadow-lg shadow-danger/40 relative animate-bounce z-10 border-2 border-white">
-                 <MapPin className="w-8 h-8" fill="currentColor" strokeWidth={1} />
-              </div>
-              {/* Shadow */}
-              <div className="w-6 h-1.5 bg-black/15 rounded-full mt-2 blur-[2px]" />
-           </div>
-
-           {/* Origin Marker (User location) */}
-           <div className="absolute top-[80%] left-[30%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-              <div className="bg-primary text-white w-14 h-14 rounded-full shadow-lg shadow-primary/40 relative border-4 border-white flex items-center justify-center z-10">
-                 <Navigation className="w-6 h-6 rotate-45" fill="currentColor" strokeWidth={1.5} />
-              </div>
-              {/* Radar rings */}
-              <div className="absolute inset-0 bg-primary/30 rounded-full animate-ping" />
-              <div className="absolute -inset-4 border border-primary/20 rounded-full" />
-              <div className="absolute -inset-8 border border-primary/10 rounded-full" />
-           </div>
-         </div>
+         <div id="map" className="absolute inset-0 w-full h-full" />
 
          {/* GPS Floating Action Button (내 위치로 이동) */}
          <button 
@@ -380,7 +394,8 @@ const Page = () => {
          </button>
       </div>
 
-    </div>
+      </div>
+    </>
   );
 };
 
