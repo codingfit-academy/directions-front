@@ -13,6 +13,22 @@ declare global {
 
 const ANIMAL_OPTIONS = ['🐶', '🐱', '🐰', '🦊', '🐼', '🐻', '🦝'];
 
+const API_BASE_URL = 'https://directions-api.codingfit.kr'
+// process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+type Signal = {
+  id: number;
+  source: string;
+  source_id: string;
+  name: string | null;
+  region_cd: string | null;
+  has_ped_signal: boolean | null;
+  cycle_time: number | null;
+  lat: number;
+  lng: number;
+  distance_m: number | null;
+};
+
 const Page = () => {
   // Drawer & Layout State
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
@@ -27,17 +43,65 @@ const Page = () => {
   const [clientId, setClientId] = useState<string>('');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const signalMarkersRef = useRef<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [nearbySignals, setNearbySignals] = useState<Signal[]>([]);
+  const [serverStatus, setServerStatus] = useState<boolean | null>(null);
+  const [selectedAnimal, setSelectedAnimal] = useState(ANIMAL_OPTIONS[0]);
 
   useEffect(() => {
-    fetch('https://directions-api.codingfit.kr/config')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.naverMapsClientId) {
-          setClientId(data.naverMapsClientId);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [configRes, healthRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/config`),
+          fetch(`${API_BASE_URL}/health`).catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (configRes.ok) {
+          const data = await configRes.json();
+          if (data.naverMapsClientId) setClientId(data.naverMapsClientId);
         }
-      })
-      .catch((err) => console.error('Failed to fetch config:', err));
+        setServerStatus(!!(healthRes && healthRes.ok));
+      } catch (err) {
+        console.error('Failed to fetch backend config/health:', err);
+        if (!cancelled) setServerStatus(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const fetchNearbySignals = async (lat: number, lng: number) => {
+    try {
+      const url = `${API_BASE_URL}/signals/nearby?lat=${lat}&lng=${lng}&radius_m=500&limit=50`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const data: Signal[] = await res.json();
+      setNearbySignals(data);
+
+      if (mapRef.current && window.naver && window.naver.maps) {
+        signalMarkersRef.current.forEach((m) => m.setMap(null));
+        signalMarkersRef.current = data.map(
+          (s) =>
+            new window.naver.maps.Marker({
+              position: new window.naver.maps.LatLng(s.lat, s.lng),
+              map: mapRef.current,
+              title: s.name || `신호등 #${s.id}`,
+              icon: {
+                content:
+                  '<div style="width:10px;height:10px;border-radius:50%;background:#ef4444;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.4)"></div>',
+                anchor: new window.naver.maps.Point(7, 7),
+              },
+            }),
+        );
+      }
+    } catch (err) {
+      console.error('Failed to fetch nearby signals:', err);
+    }
+  };
 
   const initializeMap = () => {
     if (window.naver && window.naver.maps) {
@@ -68,13 +132,15 @@ const Page = () => {
           if (mapRef.current && window.naver && window.naver.maps) {
             const loc = new window.naver.maps.LatLng(lat, lng);
             mapRef.current.setCenter(loc);
-            mapRef.current.setZoom(15);
-            // 마커 추가
+            mapRef.current.setZoom(16);
+            // 내 위치 마커
             new window.naver.maps.Marker({
               position: loc,
               map: mapRef.current
             });
           }
+          // 주변 신호등 마커 표시
+          fetchNearbySignals(lat, lng);
         },
         (error) => {
           setLocationError('위치 정보를 가져올 수 없습니다.');
@@ -102,28 +168,9 @@ const Page = () => {
     return () => clearInterval(timerInterval);
   }, []);
 
-  // Backend Communication Sample
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [serverStatus, setServerStatus] = useState<boolean | null>(null);
-  const [selectedAnimal, setSelectedAnimal] = useState(ANIMAL_OPTIONS[0]);
-  
-  // 백엔드 연결을 위한 샘플 URL (현재는 연결하지 않음)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const SAMPLE_API_URL = 'https://api.sample-backend.com/v1/directions';
-  
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedAnimal(ANIMAL_OPTIONS[Math.floor(Math.random() * ANIMAL_OPTIONS.length)]);
-  }, []);
-  
-  useEffect(() => {
-    // 나중에 백엔드와 통신할 때 주석을 해제하고 사용하세요.
-    /*
-    fetch(SAMPLE_API_URL)
-      .then((res) => res.json())
-      .then((data) => setServerStatus(data))
-      .catch((err) => console.error('Error fetching backend:', err));
-    */
   }, []);
 
   // Handle Search state
