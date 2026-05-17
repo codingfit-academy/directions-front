@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"https://directions-api.codingfit.kr/signals/nearby?lat=37.5666103&lng=126.9783882&radius_m=500&limit=3\")",
+      "Bash(curl -s \"https://directions-api.codingfit.kr/health\")",
+      "Bash(curl -s \"https://directions-api.codingfit.kr/config\")",
+      "Bash(curl -s \"https://directions-api.codingfit.kr/signals/nearby?lat=37.5666103&lng=126.9783882&radius_m=5000&limit=3\")",
+      "Bash(curl -s \"https://directions-api.codingfit.kr/openapi.json\")"
+    ]
+  }
+}

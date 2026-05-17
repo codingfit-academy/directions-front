@@ -45,7 +45,6 @@ const Page = () => {
   const mapRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const signalMarkersRef = useRef<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [nearbySignals, setNearbySignals] = useState<Signal[]>([]);
   const [serverStatus, setServerStatus] = useState<boolean | null>(null);
   const [selectedAnimal, setSelectedAnimal] = useState(ANIMAL_OPTIONS[0]);
@@ -117,6 +116,10 @@ const Page = () => {
   const [trafficLight, setTrafficLight] = useState({ isGreen: false, timer: 45 });
   const isGreenLight = trafficLight.isGreen;
   const countdown = trafficLight.timer;
+
+  // 가장 가까운 신호등 중 cycle_time이 있는 항목
+  const closestSignal =
+    nearbySignals.find((s) => s.cycle_time != null) ?? nearbySignals[0] ?? null;
 
   // 위치 허용 요청 함수
   const requestLocation = () => {
@@ -354,6 +357,45 @@ const Page = () => {
                 <div className="text-right font-black text-lg tabular-nums animate-pulse">
                   {countdown}초 {isGreenLight ? '남음' : '후 출발'}
                 </div>
+             </div>
+
+             {/* 가장 가까운 신호등의 API cycle_time */}
+             <div className="mt-3 px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100 relative z-10">
+               <div className="flex items-center justify-between mb-1">
+                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                   가장 가까운 신호등
+                 </p>
+                 {closestSignal?.distance_m != null && (
+                   <span className="text-xs font-semibold text-gray-400">
+                     {Math.round(closestSignal.distance_m)}m
+                   </span>
+                 )}
+               </div>
+               {closestSignal ? (
+                 <>
+                   <p className="text-sm font-bold text-gray-900 truncate">
+                     {closestSignal.name || `신호등 #${closestSignal.id}`}
+                   </p>
+                   <div className="mt-1 flex items-baseline gap-1.5">
+                     {closestSignal.cycle_time != null ? (
+                       <>
+                         <span className="text-2xl font-black text-gray-900 tabular-nums">
+                           {closestSignal.cycle_time}
+                         </span>
+                         <span className="text-sm font-bold text-gray-400">초 주기</span>
+                       </>
+                     ) : (
+                       <span className="text-sm font-semibold text-gray-400">
+                         주기 정보 없음
+                       </span>
+                     )}
+                   </div>
+                 </>
+               ) : (
+                 <p className="text-sm font-medium text-gray-400">
+                   내 위치 버튼을 눌러 주변 신호등을 불러오세요
+                 </p>
+               )}
              </div>
           </div>
 
