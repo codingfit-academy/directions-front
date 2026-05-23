@@ -29,13 +29,29 @@ type Signal = {
   distance_m: number | null;
 };
 
+type GeocodeOut = {
+  lat: number;
+  lng: number;
+  address: string;
+  road_address: string | null;
+};
+
+type RouteResponse = {
+  origin: GeocodeOut;
+  destination: GeocodeOut;
+  duration_ms: number;
+  distance_m: number;
+  path: [number, number][]; // [lat, lng]
+  signals: Signal[];
+  signal_delay_estimate_s: number;
+};
+
 const Page = () => {
   // Drawer & Layout State
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
   const [touchStartY, setTouchStartY] = useState<number | null>(null);
 
   // GPS Location State
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [locationError, setLocationError] = useState('');
 
@@ -45,9 +61,18 @@ const Page = () => {
   const mapRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const signalMarkersRef = useRef<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const routePolylineRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const routeMarkersRef = useRef<any[]>([]);
   const [nearbySignals, setNearbySignals] = useState<Signal[]>([]);
   const [serverStatus, setServerStatus] = useState<boolean | null>(null);
   const [selectedAnimal, setSelectedAnimal] = useState(ANIMAL_OPTIONS[0]);
+
+  // Route State
+  const [routeResult, setRouteResult] = useState<RouteResponse | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +97,121 @@ const Page = () => {
       cancelled = true;
     };
   }, []);
+
+  const clearRouteOverlays = () => {
+    if (routePolylineRef.current) {
+      routePolylineRef.current.setMap(null);
+      routePolylineRef.current = null;
+    }
+    routeMarkersRef.current.forEach((m) => m.setMap(null));
+    routeMarkersRef.current = [];
+  };
+
+  const drawRouteOnMap = (route: RouteResponse) => {
+    if (!mapRef.current || !window.naver || !window.naver.maps) return;
+    clearRouteOverlays();
+
+    const naver = window.naver;
+    const latlngs = route.path.map(([lat, lng]) => new naver.maps.LatLng(lat, lng));
+
+    routePolylineRef.current = new naver.maps.Polyline({
+      map: mapRef.current,
+      path: latlngs,
+      strokeColor: '#2563eb',
+      strokeOpacity: 0.85,
+      strokeWeight: 6,
+    });
+
+    // 출발/도착 마커
+    routeMarkersRef.current.push(
+      new naver.maps.Marker({
+        position: new naver.maps.LatLng(route.origin.lat, route.origin.lng),
+        map: mapRef.current,
+        title: `출발: ${route.origin.address}`,
+        icon: {
+          content:
+            '<div style="width:14px;height:14px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,0.4)"></div>',
+          anchor: new naver.maps.Point(10, 10),
+        },
+      }),
+    );
+    routeMarkersRef.current.push(
+      new naver.maps.Marker({
+        position: new naver.maps.LatLng(route.destination.lat, route.destination.lng),
+        map: mapRef.current,
+        title: `도착: ${route.destination.address}`,
+        icon: {
+          content:
+            '<div style="width:14px;height:14px;border-radius:50%;background:#ef4444;border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,0.4)"></div>',
+          anchor: new naver.maps.Point(10, 10),
+        },
+      }),
+    );
+
+    // 경로상 신호등 마커 (주황색)
+    route.signals.forEach((s) => {
+      routeMarkersRef.current.push(
+        new naver.maps.Marker({
+          position: new naver.maps.LatLng(s.lat, s.lng),
+          map: mapRef.current,
+          title: s.name || `신호등 #${s.id}`,
+          icon: {
+            content:
+              '<div style="width:12px;height:12px;border-radius:50%;background:#f59e0b;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.4)"></div>',
+            anchor: new naver.maps.Point(8, 8),
+          },
+        }),
+      );
+    });
+
+    // 경로 전체가 보이도록 fit bounds
+    if (latlngs.length > 0) {
+      const bounds = new naver.maps.LatLngBounds(latlngs[0], latlngs[0]);
+      latlngs.forEach((p: unknown) => bounds.extend(p as never));
+      mapRef.current.fitBounds(bounds);
+    }
+  };
+
+  const fetchRoute = async () => {
+    setRouteError('');
+    if (!origin.trim() || !destination.trim()) {
+      setRouteError('출발지와 도착지를 모두 입력해주세요.');
+      return;
+    }
+
+    const usingMyLocation = origin === '현재 내 위치' && userLocation;
+    const body = {
+      origin: usingMyLocation
+        ? { lat: userLocation!.lat, lng: userLocation!.lng, text: origin }
+        : { text: origin },
+      destination: { text: destination },
+      option: 'trafast',
+      signal_buffer_m: 30,
+    };
+
+    setRouteLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/directions/route`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errPayload = await res.json().catch(() => null);
+        throw new Error(errPayload?.detail || `status ${res.status}`);
+      }
+      const data: RouteResponse = await res.json();
+      setRouteResult(data);
+      drawRouteOnMap(data);
+    } catch (err) {
+      console.error('Route request failed:', err);
+      setRouteError(err instanceof Error ? err.message : '경로를 가져오지 못했습니다.');
+      setRouteResult(null);
+      clearRouteOverlays();
+    } finally {
+      setRouteLoading(false);
+    }
+  };
 
   const fetchNearbySignals = async (lat: number, lng: number) => {
     try {
@@ -318,10 +458,22 @@ const Page = () => {
                 />
               </div>
 
-              <button className="flex-[0.5] bg-gray-900 hover:bg-gray-800 text-white font-semibold py-3.5 rounded-2xl transition-all shadow-lg shadow-gray-900/20 active:scale-95 flex items-center justify-center">
-                <Search className="w-5 h-5" />
+              <button
+                onClick={fetchRoute}
+                disabled={routeLoading}
+                className="flex-[0.5] bg-gray-900 hover:bg-gray-800 text-white font-semibold py-3.5 rounded-2xl transition-all shadow-lg shadow-gray-900/20 active:scale-95 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {routeLoading ? (
+                  <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Search className="w-5 h-5" />
+                )}
               </button>
             </div>
+
+            {routeError && (
+              <p className="text-xs text-danger mt-1 px-1">{routeError}</p>
+            )}
           </div>
         </div>
 
@@ -335,11 +487,25 @@ const Page = () => {
 
              <div className="flex justify-between items-start mb-5 relative z-10">
                <div>
-                 <p className="text-sm font-semibold text-gray-500 mb-1">예상 도착 시간(ETA)</p>
+                 <p className="text-sm font-semibold text-gray-500 mb-1">
+                   {routeResult ? '예상 소요 시간' : '예상 도착 시간(ETA)'}
+                 </p>
                  <div className="flex items-baseline gap-1">
-                   <h2 className="text-4xl font-black text-gray-900 tracking-tight">45</h2>
+                   <h2 className="text-4xl font-black text-gray-900 tracking-tight">
+                     {routeResult
+                       ? Math.max(1, Math.round((routeResult.duration_ms + routeResult.signal_delay_estimate_s * 1000) / 60000))
+                       : 45}
+                   </h2>
                    <span className="text-lg font-bold text-gray-400">min</span>
                  </div>
+                 {routeResult && (
+                   <p className="text-xs font-semibold text-gray-400 mt-1">
+                     {(routeResult.distance_m / 1000).toFixed(1)}km
+                     {routeResult.signal_delay_estimate_s > 0 && (
+                       <> · 신호 대기 ≈ {routeResult.signal_delay_estimate_s}초</>
+                     )}
+                   </p>
+                 )}
                </div>
                
                {/* Traffic indicator UI */}
@@ -358,6 +524,26 @@ const Page = () => {
                   {countdown}초 {isGreenLight ? '남음' : '후 출발'}
                 </div>
              </div>
+
+             {/* 경로상 신호등 요약 (경로 검색 후) */}
+             {routeResult && (
+               <div className="mt-3 px-4 py-3 bg-amber-50 rounded-2xl border border-amber-100 relative z-10">
+                 <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">
+                   경로상 신호등
+                 </p>
+                 <div className="flex items-baseline gap-1.5">
+                   <span className="text-2xl font-black text-gray-900 tabular-nums">
+                     {routeResult.signals.length}
+                   </span>
+                   <span className="text-sm font-bold text-gray-500">개</span>
+                   {routeResult.signal_delay_estimate_s > 0 && (
+                     <span className="ml-auto text-xs font-semibold text-amber-700">
+                       예상 대기 {routeResult.signal_delay_estimate_s}초
+                     </span>
+                   )}
+                 </div>
+               </div>
+             )}
 
              {/* 가장 가까운 신호등의 API cycle_time */}
              <div className="mt-3 px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100 relative z-10">
