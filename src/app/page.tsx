@@ -83,6 +83,14 @@ const Page = () => {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState('');
 
+  // Geocoded points (검색으로 확정된 좌표)
+  const [originPoint, setOriginPoint] = useState<GeocodeOut | null>(null);
+  const [destinationPoint, setDestinationPoint] = useState<GeocodeOut | null>(null);
+  const [originSearching, setOriginSearching] = useState(false);
+  const [destinationSearching, setDestinationSearching] = useState(false);
+  const [originSearchError, setOriginSearchError] = useState('');
+  const [destinationSearchError, setDestinationSearchError] = useState('');
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -106,6 +114,63 @@ const Page = () => {
       cancelled = true;
     };
   }, []);
+
+  const geocodeAddress = async (
+    query: string,
+    setPoint: (p: GeocodeOut | null) => void,
+    setText: (s: string) => void,
+    setSearching: (b: boolean) => void,
+    setError: (s: string) => void,
+  ) => {
+    setError('');
+    if (!query.trim()) {
+      setError('검색어를 입력하세요.');
+      return;
+    }
+    setSearching(true);
+    try {
+      const url = `${API_BASE_URL}/directions/geocode?q=${encodeURIComponent(query)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const errPayload = await res.json().catch(() => null);
+        throw new Error(errPayload?.detail || `status ${res.status}`);
+      }
+      const data: GeocodeOut = await res.json();
+      setPoint(data);
+      setText(data.address);
+      // 검색 성공 시 지도에 임시 마커 표시 + 이동
+      if (mapRef.current && window.naver && window.naver.maps) {
+        const naver = window.naver;
+        const loc = new naver.maps.LatLng(data.lat, data.lng);
+        mapRef.current.setCenter(loc);
+        mapRef.current.setZoom(15);
+      }
+    } catch (err) {
+      console.error('Geocode failed:', err);
+      setPoint(null);
+      setError(err instanceof Error ? err.message : '검색 실패');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const searchOrigin = () =>
+    geocodeAddress(
+      origin,
+      setOriginPoint,
+      setOrigin,
+      setOriginSearching,
+      setOriginSearchError,
+    );
+
+  const searchDestination = () =>
+    geocodeAddress(
+      destination,
+      setDestinationPoint,
+      setDestination,
+      setDestinationSearching,
+      setDestinationSearchError,
+    );
 
   const clearRouteOverlays = () => {
     if (routePolylineRef.current) {
@@ -188,12 +253,20 @@ const Page = () => {
       return;
     }
 
+    // 우선순위: 검색으로 확정된 좌표 > GPS > 텍스트
     const usingMyLocation = origin === '현재 내 위치' && userLocation;
-    const body = {
-      origin: usingMyLocation
+    const originBody = originPoint
+      ? { lat: originPoint.lat, lng: originPoint.lng, text: originPoint.address }
+      : usingMyLocation
         ? { lat: userLocation!.lat, lng: userLocation!.lng, text: origin }
-        : { text: origin },
-      destination: { text: destination },
+        : { text: origin };
+    const destinationBody = destinationPoint
+      ? { lat: destinationPoint.lat, lng: destinationPoint.lng, text: destinationPoint.address }
+      : { text: destination };
+
+    const body = {
+      origin: originBody,
+      destination: destinationBody,
       option: 'trafast',
       signal_buffer_m: 30,
     };
@@ -301,7 +374,9 @@ const Page = () => {
           const lng = position.coords.longitude;
           setUserLocation({ lat, lng });
           setOrigin('현재 내 위치');
+          setOriginPoint({ lat, lng, address: '현재 내 위치', road_address: null });
           setLocationError('');
+          setOriginSearchError('');
           
           if (mapRef.current && window.naver && window.naver.maps) {
             const loc = new window.naver.maps.LatLng(lat, lng);
@@ -430,36 +505,95 @@ const Page = () => {
           <div className="space-y-4">
             <div className="relative group">
               <div className="absolute left-3.5 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary border-2 border-primary/20" />
-              <input 
-                type="text" 
-                placeholder="출발지를 입력하세요" 
+              <input
+                type="text"
+                placeholder="출발지를 입력하세요"
                 value={origin}
-                onChange={(e) => setOrigin(e.target.value)}
-                className="w-full pl-10 pr-12 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
+                onChange={(e) => {
+                  setOrigin(e.target.value);
+                  setOriginPoint(null);
+                  setOriginSearchError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') searchOrigin();
+                }}
+                className="w-full pl-10 pr-20 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
               />
-              <button 
-                onClick={requestLocation}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-primary hover:bg-white rounded-xl transition-all"
-                title="내 위치 가져오기"
-              >
-                <Crosshair className="w-4 h-4" />
-              </button>
+              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                <button
+                  onClick={searchOrigin}
+                  disabled={originSearching}
+                  className="p-2 text-gray-400 hover:text-primary hover:bg-white rounded-xl transition-all disabled:opacity-50"
+                  title="검색"
+                >
+                  {originSearching ? (
+                    <div className="w-4 h-4 border-2 border-gray-300 border-t-primary rounded-full animate-spin" />
+                  ) : (
+                    <Search className="w-4 h-4" />
+                  )}
+                </button>
+                <button
+                  onClick={requestLocation}
+                  className="p-2 text-gray-400 hover:text-primary hover:bg-white rounded-xl transition-all"
+                  title="내 위치 가져오기"
+                >
+                  <Crosshair className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-            
+
+            {originPoint && (
+              <p className="text-xs text-success mt-1 px-1 flex items-center gap-1">
+                <span className="w-1 h-1 bg-success rounded-full" />
+                {originPoint.address} ({originPoint.lat.toFixed(5)}, {originPoint.lng.toFixed(5)})
+              </p>
+            )}
+            {originSearchError && (
+              <p className="text-xs text-danger mt-1 px-1">{originSearchError}</p>
+            )}
             {locationError && (
               <p className="text-xs text-danger mt-1 px-1">{locationError}</p>
             )}
-            
+
             <div className="relative group">
               <MapPin className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-danger" />
-              <input 
-                type="text" 
-                placeholder="도착지를 입력하세요" 
+              <input
+                type="text"
+                placeholder="도착지를 입력하세요"
                 value={destination}
-                onChange={(e) => setDestination(e.target.value)}
-                className="w-full pl-10 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-4 focus:ring-danger/10 focus:border-danger outline-none transition-all text-sm font-medium"
+                onChange={(e) => {
+                  setDestination(e.target.value);
+                  setDestinationPoint(null);
+                  setDestinationSearchError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') searchDestination();
+                }}
+                className="w-full pl-10 pr-12 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-4 focus:ring-danger/10 focus:border-danger outline-none transition-all text-sm font-medium"
               />
+              <button
+                onClick={searchDestination}
+                disabled={destinationSearching}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-danger hover:bg-white rounded-xl transition-all disabled:opacity-50"
+                title="검색"
+              >
+                {destinationSearching ? (
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-danger rounded-full animate-spin" />
+                ) : (
+                  <Search className="w-4 h-4" />
+                )}
+              </button>
             </div>
+
+            {destinationPoint && (
+              <p className="text-xs text-success mt-1 px-1 flex items-center gap-1">
+                <span className="w-1 h-1 bg-success rounded-full" />
+                {destinationPoint.address} ({destinationPoint.lat.toFixed(5)}, {destinationPoint.lng.toFixed(5)})
+              </p>
+            )}
+            {destinationSearchError && (
+              <p className="text-xs text-danger mt-1 px-1">{destinationSearchError}</p>
+            )}
 
             <div className="flex gap-4">
               <div className="relative group flex-1">
