@@ -16,6 +16,21 @@ const ANIMAL_OPTIONS = ['🐶', '🐱', '🐰', '🦊', '🐼', '🐻', '🦝'];
 const API_BASE_URL = 'https://directions-api.codingfit.kr'
 // process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// 본 앱은 근거리 보행 전용 — 출발·도착 직선거리 상한 (m)
+const MAX_ROUTE_DISTANCE_M = 2000;
+
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const p1 = (lat1 * Math.PI) / 180;
+  const p2 = (lat2 * Math.PI) / 180;
+  const dp = ((lat2 - lat1) * Math.PI) / 180;
+  const dl = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dp / 2) ** 2 +
+    Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 type Signal = {
   id: number;
   source: string;
@@ -45,6 +60,7 @@ type RealtimeTraffic = {
 };
 
 type RouteResponse = {
+  mode: 'walking' | 'driving';
   origin: GeocodeOut;
   destination: GeocodeOut;
   duration_ms: number;
@@ -90,6 +106,21 @@ const Page = () => {
   const [destinationSearching, setDestinationSearching] = useState(false);
   const [originSearchError, setOriginSearchError] = useState('');
   const [destinationSearchError, setDestinationSearchError] = useState('');
+  const [originCandidates, setOriginCandidates] = useState<GeocodeOut[]>([]);
+  const [destinationCandidates, setDestinationCandidates] = useState<GeocodeOut[]>([]);
+
+  // 이동 모드 (walking 기본, driving 옵션)
+  const [travelMode, setTravelMode] = useState<'walking' | 'driving'>('walking');
+
+  // 두 점이 모두 확정되었을 때의 직선거리(m). 그렇지 않으면 null.
+  const straightDistanceM = (() => {
+    const o = originPoint ?? (userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : null);
+    const d = destinationPoint;
+    if (!o || !d) return null;
+    return haversineMeters(o.lat, o.lng, d.lat, d.lng);
+  })();
+  const isOverRange =
+    straightDistanceM != null && straightDistanceM > MAX_ROUTE_DISTANCE_M;
 
   useEffect(() => {
     let cancelled = false;
@@ -115,59 +146,69 @@ const Page = () => {
     };
   }, []);
 
-  const geocodeAddress = async (
+  const searchCandidates = async (
     query: string,
-    setPoint: (p: GeocodeOut | null) => void,
-    setText: (s: string) => void,
+    setCandidates: (list: GeocodeOut[]) => void,
     setSearching: (b: boolean) => void,
     setError: (s: string) => void,
   ) => {
     setError('');
+    setCandidates([]);
     if (!query.trim()) {
       setError('검색어를 입력하세요.');
       return;
     }
     setSearching(true);
     try {
-      const url = `${API_BASE_URL}/directions/geocode?q=${encodeURIComponent(query)}`;
+      const url = `${API_BASE_URL}/directions/geocode/search?q=${encodeURIComponent(query)}&limit=5`;
       const res = await fetch(url);
       if (!res.ok) {
         const errPayload = await res.json().catch(() => null);
         throw new Error(errPayload?.detail || `status ${res.status}`);
       }
-      const data: GeocodeOut = await res.json();
-      setPoint(data);
-      setText(data.address);
-      // 검색 성공 시 지도에 임시 마커 표시 + 이동
-      if (mapRef.current && window.naver && window.naver.maps) {
-        const naver = window.naver;
-        const loc = new naver.maps.LatLng(data.lat, data.lng);
-        mapRef.current.setCenter(loc);
-        mapRef.current.setZoom(15);
+      const data: GeocodeOut[] = await res.json();
+      if (!data.length) {
+        setError('검색 결과가 없습니다.');
+      } else {
+        setCandidates(data);
       }
     } catch (err) {
-      console.error('Geocode failed:', err);
-      setPoint(null);
+      console.error('Geocode search failed:', err);
       setError(err instanceof Error ? err.message : '검색 실패');
     } finally {
       setSearching(false);
     }
   };
 
+  const pickCandidate = (
+    candidate: GeocodeOut,
+    setPoint: (p: GeocodeOut | null) => void,
+    setText: (s: string) => void,
+    setCandidates: (list: GeocodeOut[]) => void,
+  ) => {
+    setPoint(candidate);
+    setText(candidate.address);
+    setCandidates([]);
+    if (mapRef.current && window.naver && window.naver.maps) {
+      const naver = window.naver;
+      const loc = new naver.maps.LatLng(candidate.lat, candidate.lng);
+      mapRef.current.setCenter(loc);
+      mapRef.current.setZoom(15);
+    }
+  };
+
   const searchOrigin = () =>
-    geocodeAddress(
+    searchCandidates(
       origin,
-      setOriginPoint,
-      setOrigin,
+      setOriginCandidates,
       setOriginSearching,
       setOriginSearchError,
     );
 
   const searchDestination = () =>
-    geocodeAddress(
+    searchCandidates(
       destination,
-      setDestinationPoint,
-      setDestination,
+      setDestinationCandidates,
       setDestinationSearching,
       setDestinationSearchError,
     );
@@ -253,6 +294,28 @@ const Page = () => {
       return;
     }
 
+    // 출발·도착 모두 좌표가 확정되어 있으면 직선거리 사전 검증
+    const originCoords = originPoint
+      ? { lat: originPoint.lat, lng: originPoint.lng }
+      : userLocation;
+    const destCoords = destinationPoint
+      ? { lat: destinationPoint.lat, lng: destinationPoint.lng }
+      : null;
+    if (originCoords && destCoords) {
+      const meters = haversineMeters(
+        originCoords.lat, originCoords.lng,
+        destCoords.lat, destCoords.lng,
+      );
+      if (meters > MAX_ROUTE_DISTANCE_M) {
+        setRouteError(
+          `직선거리 ${(meters / 1000).toFixed(2)}km 는 허용 범위 ` +
+          `${(MAX_ROUTE_DISTANCE_M / 1000).toFixed(1)}km 를 초과합니다. ` +
+          `이 앱은 근거리 보행 전용입니다.`
+        );
+        return;
+      }
+    }
+
     // 우선순위: 검색으로 확정된 좌표 > GPS > 텍스트
     const usingMyLocation = origin === '현재 내 위치' && userLocation;
     const originBody = originPoint
@@ -267,6 +330,7 @@ const Page = () => {
     const body = {
       origin: originBody,
       destination: destinationBody,
+      mode: travelMode,
       option: 'trafast',
       signal_buffer_m: 30,
     };
@@ -512,6 +576,7 @@ const Page = () => {
                 onChange={(e) => {
                   setOrigin(e.target.value);
                   setOriginPoint(null);
+                  setOriginCandidates([]);
                   setOriginSearchError('');
                 }}
                 onKeyDown={(e) => {
@@ -548,6 +613,25 @@ const Page = () => {
                 {originPoint.address} ({originPoint.lat.toFixed(5)}, {originPoint.lng.toFixed(5)})
               </p>
             )}
+            {originCandidates.length > 0 && (
+              <ul className="mt-1 bg-white border border-gray-200 rounded-xl shadow-sm divide-y divide-gray-100 overflow-hidden">
+                {originCandidates.map((c, i) => (
+                  <li key={`${c.lat}-${c.lng}-${i}`}>
+                    <button
+                      onClick={() =>
+                        pickCandidate(c, setOriginPoint, setOrigin, setOriginCandidates)
+                      }
+                      className="w-full text-left px-3 py-2 hover:bg-primary/5 active:bg-primary/10 transition-colors"
+                    >
+                      <p className="text-sm font-semibold text-gray-900 truncate">{c.address}</p>
+                      <p className="text-[10px] font-medium text-gray-400 tabular-nums">
+                        {c.lat.toFixed(5)}, {c.lng.toFixed(5)}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             {originSearchError && (
               <p className="text-xs text-danger mt-1 px-1">{originSearchError}</p>
             )}
@@ -564,6 +648,7 @@ const Page = () => {
                 onChange={(e) => {
                   setDestination(e.target.value);
                   setDestinationPoint(null);
+                  setDestinationCandidates([]);
                   setDestinationSearchError('');
                 }}
                 onKeyDown={(e) => {
@@ -591,16 +676,84 @@ const Page = () => {
                 {destinationPoint.address} ({destinationPoint.lat.toFixed(5)}, {destinationPoint.lng.toFixed(5)})
               </p>
             )}
+            {destinationCandidates.length > 0 && (
+              <ul className="mt-1 bg-white border border-gray-200 rounded-xl shadow-sm divide-y divide-gray-100 overflow-hidden">
+                {destinationCandidates.map((c, i) => (
+                  <li key={`${c.lat}-${c.lng}-${i}`}>
+                    <button
+                      onClick={() =>
+                        pickCandidate(
+                          c,
+                          setDestinationPoint,
+                          setDestination,
+                          setDestinationCandidates,
+                        )
+                      }
+                      className="w-full text-left px-3 py-2 hover:bg-danger/5 active:bg-danger/10 transition-colors"
+                    >
+                      <p className="text-sm font-semibold text-gray-900 truncate">{c.address}</p>
+                      <p className="text-[10px] font-medium text-gray-400 tabular-nums">
+                        {c.lat.toFixed(5)}, {c.lng.toFixed(5)}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             {destinationSearchError && (
               <p className="text-xs text-danger mt-1 px-1">{destinationSearchError}</p>
             )}
 
+            {/* 거리 미리보기 배지 — 두 좌표 확정됐을 때 */}
+            {straightDistanceM != null && (
+              <div
+                className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between ${
+                  isOverRange
+                    ? 'bg-danger/10 text-danger border border-danger/20'
+                    : 'bg-success/10 text-success border border-success/20'
+                }`}
+              >
+                <span>
+                  직선거리 {(straightDistanceM / 1000).toFixed(2)} km
+                </span>
+                <span className="text-[10px] font-semibold opacity-80">
+                  {isOverRange
+                    ? `최대 ${(MAX_ROUTE_DISTANCE_M / 1000).toFixed(1)}km 초과 — 검색 불가`
+                    : `한도 ${(MAX_ROUTE_DISTANCE_M / 1000).toFixed(1)}km 내`}
+                </span>
+              </div>
+            )}
+
+            {/* 이동 모드 토글 */}
+            <div className="flex p-1 bg-gray-100 rounded-2xl gap-1">
+              <button
+                onClick={() => setTravelMode('walking')}
+                className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${
+                  travelMode === 'walking'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                🚶 보행
+              </button>
+              <button
+                onClick={() => setTravelMode('driving')}
+                className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${
+                  travelMode === 'driving'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                🚗 자동차
+              </button>
+            </div>
+
             <div className="flex gap-4">
               <div className="relative group flex-1">
                 <Activity className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input 
-                  type="number" 
-                  placeholder="연령 (나이)" 
+                <input
+                  type="number"
+                  placeholder="연령 (나이)"
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
                   className="w-full pl-10 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm font-medium"
@@ -609,7 +762,8 @@ const Page = () => {
 
               <button
                 onClick={fetchRoute}
-                disabled={routeLoading}
+                disabled={routeLoading || isOverRange}
+                title={isOverRange ? '직선거리가 한도를 초과해 검색할 수 없습니다.' : undefined}
                 className="flex-[0.5] bg-gray-900 hover:bg-gray-800 text-white font-semibold py-3.5 rounded-2xl transition-all shadow-lg shadow-gray-900/20 active:scale-95 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {routeLoading ? (
@@ -636,8 +790,13 @@ const Page = () => {
 
              <div className="flex justify-between items-start mb-5 relative z-10">
                <div>
-                 <p className="text-sm font-semibold text-gray-500 mb-1">
+                 <p className="text-sm font-semibold text-gray-500 mb-1 flex items-center gap-2">
                    {routeResult ? '예상 소요 시간' : '예상 도착 시간(ETA)'}
+                   {routeResult && (
+                     <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                       {routeResult.mode === 'walking' ? '🚶 보행' : '🚗 자동차'}
+                     </span>
+                   )}
                  </p>
                  <div className="flex items-baseline gap-1">
                    <h2 className="text-4xl font-black text-gray-900 tracking-tight">
