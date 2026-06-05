@@ -36,6 +36,14 @@ type GeocodeOut = {
   road_address: string | null;
 };
 
+type RealtimeTraffic = {
+  sample_count: number;
+  avg_speed_kmh: number;
+  timestamp: string | null;
+  congestion: string;
+  eta_factor: number;
+};
+
 type RouteResponse = {
   origin: GeocodeOut;
   destination: GeocodeOut;
@@ -44,6 +52,7 @@ type RouteResponse = {
   path: [number, number][]; // [lat, lng]
   signals: Signal[];
   signal_delay_estimate_s: number;
+  realtime_traffic: RealtimeTraffic | null;
 };
 
 const Page = () => {
@@ -252,14 +261,36 @@ const Page = () => {
     }
   };
 
-  // State for traffic light simulation
-  const [trafficLight, setTrafficLight] = useState({ isGreen: false, timer: 45 });
-  const isGreenLight = trafficLight.isGreen;
-  const countdown = trafficLight.timer;
-
   // 가장 가까운 신호등 중 cycle_time이 있는 항목
   const closestSignal =
     nearbySignals.find((s) => s.cycle_time != null) ?? nearbySignals[0] ?? null;
+
+  // 신호등 phase 시뮬레이션 — closestSignal.cycle_time + 신호등별 결정적 오프셋 + wall clock
+  // 한국 평균: 적 ≈ 60%, 녹 ≈ 40% 가정.
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const t = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const trafficPhase = (() => {
+    const cycle = closestSignal?.cycle_time && closestSignal.cycle_time > 0
+      ? closestSignal.cycle_time
+      : 75;
+    const greenDuration = Math.max(1, Math.round(cycle * 0.4));
+    const redDuration = Math.max(1, cycle - greenDuration);
+    // signal.id 기반 결정적 오프셋(같은 신호등은 항상 같은 phase)
+    const offset = closestSignal ? (closestSignal.id * 13) % cycle : 0;
+    const elapsed = (nowSec + offset) % cycle;
+    const isGreen = elapsed < greenDuration;
+    const timer = isGreen
+      ? greenDuration - elapsed
+      : cycle - elapsed; // 적색 잔여 = 사이클 끝까지
+    return { isGreen, timer, cycle, greenDuration, redDuration };
+  })();
+
+  const isGreenLight = trafficPhase.isGreen;
+  const countdown = trafficPhase.timer;
 
   // 위치 허용 요청 함수
   const requestLocation = () => {
@@ -294,22 +325,6 @@ const Page = () => {
       setLocationError('이 브라우저에서는 위치 서비스를 지원하지 않습니다.');
     }
   };
-
-  // Simulating traffic light countdown
-  useEffect(() => {
-    const timerInterval = setInterval(() => {
-      setTrafficLight((prev) => {
-        if (prev.timer <= 1) {
-          const nextIsGreen = !prev.isGreen;
-          // 30 seconds for green, 45 seconds for red
-          return { isGreen: nextIsGreen, timer: nextIsGreen ? 30 : 45 };
-        }
-        return { ...prev, timer: prev.timer - 1 };
-      });
-    }, 1000);
-
-    return () => clearInterval(timerInterval);
-  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -504,6 +519,9 @@ const Page = () => {
                      {routeResult.signal_delay_estimate_s > 0 && (
                        <> · 신호 대기 ≈ {routeResult.signal_delay_estimate_s}초</>
                      )}
+                     {routeResult.realtime_traffic && (
+                       <> · 실시간 {routeResult.realtime_traffic.avg_speed_kmh}km/h</>
+                     )}
                    </p>
                  )}
                </div>
@@ -539,6 +557,36 @@ const Page = () => {
                    {routeResult.signal_delay_estimate_s > 0 && (
                      <span className="ml-auto text-xs font-semibold text-amber-700">
                        예상 대기 {routeResult.signal_delay_estimate_s}초
+                     </span>
+                   )}
+                 </div>
+               </div>
+             )}
+
+             {/* 서울 TOPIS 실시간 도로 소통 */}
+             {routeResult?.realtime_traffic && (
+               <div className="mt-3 px-4 py-3 bg-blue-50 rounded-2xl border border-blue-100 relative z-10">
+                 <div className="flex items-center justify-between mb-1">
+                   <p className="text-xs font-bold text-blue-700 uppercase tracking-wide">
+                     실시간 도로 소통 (서울)
+                   </p>
+                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                     routeResult.realtime_traffic.congestion === '원활' ? 'bg-success/10 text-success' :
+                     routeResult.realtime_traffic.congestion === '서행' ? 'bg-yellow-100 text-yellow-700' :
+                     routeResult.realtime_traffic.congestion === '지정체' ? 'bg-orange-100 text-orange-700' :
+                     'bg-danger/10 text-danger'
+                   }`}>
+                     {routeResult.realtime_traffic.congestion}
+                   </span>
+                 </div>
+                 <div className="flex items-baseline gap-1.5">
+                   <span className="text-2xl font-black text-gray-900 tabular-nums">
+                     {routeResult.realtime_traffic.avg_speed_kmh}
+                   </span>
+                   <span className="text-sm font-bold text-gray-500">km/h 평균</span>
+                   {routeResult.realtime_traffic.eta_factor !== 1 && (
+                     <span className="ml-auto text-xs font-semibold text-blue-700">
+                       ETA ×{routeResult.realtime_traffic.eta_factor.toFixed(2)}
                      </span>
                    )}
                  </div>
