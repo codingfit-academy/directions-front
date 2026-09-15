@@ -12,6 +12,16 @@ type Category = {
   created_at: string;
 };
 
+// 배포 도메인 앞단(Cloudflare 등 edge)이 OPTIONS 프리플라이트를 자체적으로 가로채
+// 응답하는데, 그 응답의 Access-Control-Allow-Headers가 `Content-Type,Authorization`
+// 으로 고정돼 있다. 커스텀 헤더(X-Admin-Token)는 이 목록에 없어서 브라우저가
+// 프리플라이트 단계에서 요청 자체를 막아버린다 — 그래서 이미 허용된 Authorization
+// 헤더에 토큰을 실어 보낸다(서버 app/auth.py의 require_admin이 Authorization: Bearer
+// 형태도 받아준다).
+function adminHeaders(token: string): HeadersInit {
+  return { Authorization: `Bearer ${token}` };
+}
+
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={`rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ${className}`}>
@@ -52,7 +62,7 @@ export default function AdminPage() {
     setListError('');
     try {
       const res = await fetch(`${API_BASE_URL}/admin/categories`, {
-        headers: { 'X-Admin-Token': activeToken },
+        headers: adminHeaders(activeToken),
       });
       if (res.status === 403 || res.status === 503) {
         throw new Error('관리자 토큰이 올바르지 않습니다.');
@@ -65,7 +75,7 @@ export default function AdminPage() {
         data.map(async (c) => {
           try {
             const imgRes = await fetch(`${API_BASE_URL}/admin/categories/${c.id}/image`, {
-              headers: { 'X-Admin-Token': activeToken },
+              headers: adminHeaders(activeToken),
             });
             if (!imgRes.ok) return [c.id, ''] as const;
             const blob = await imgRes.blob();
@@ -97,7 +107,7 @@ export default function AdminPage() {
     setTokenError('');
     try {
       const res = await fetch(`${API_BASE_URL}/admin/categories`, {
-        headers: { 'X-Admin-Token': value },
+        headers: adminHeaders(value),
       });
       if (!res.ok) throw new Error('토큰이 올바르지 않습니다.');
       window.localStorage.setItem(TOKEN_STORAGE_KEY, value);
@@ -139,7 +149,7 @@ export default function AdminPage() {
       form.append('image', newFile);
       const res = await fetch(`${API_BASE_URL}/admin/categories`, {
         method: 'POST',
-        headers: { 'X-Admin-Token': token },
+        headers: adminHeaders(token),
         body: form,
       });
       if (!res.ok) {
@@ -162,7 +172,7 @@ export default function AdminPage() {
     try {
       const res = await fetch(`${API_BASE_URL}/admin/categories/${id}`, {
         method: 'DELETE',
-        headers: { 'X-Admin-Token': token },
+        headers: adminHeaders(token),
       });
       if (!res.ok && res.status !== 404) throw new Error(`status ${res.status}`);
       await loadCategories(token);
